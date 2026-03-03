@@ -1,19 +1,13 @@
 """
 reranker.py — Full recommendation pipeline
-LLM cascade: Cerebras (llama-3.3-70b, free 1M/day, fastest) 
-           → Gemini 2.0 Flash (free 1M/day)
-           → Retrieval order (no 8b — it hurts recall)
-
-Injection system handles unknown roles/phrasing via:
-  1. Hardcoded rules (zero tokens, known patterns)
-  2. Semantic analysis via LLM (handles any phrasing)
-  3. Type anchors (cognitive/personality/leadership always covered)
+LLM: OpenRouter (llama-3.3-70b → mistral → gemma → qwen → auto)
+Free tier: 1M tokens/day, 30 RPM
+Get key: openrouter.ai → Sign up → Keys → Create key
 """
 
-import os, json, re, requests
+import os, json, re, requests, time
 
-CEREBRAS_KEY = os.getenv("CEREBRAS_API_KEY", "")
-GEMINI_KEY   = os.getenv("GEMINI_API_KEY", "")
+OPENROUTER_KEY = os.getenv("OPENROUTER_API_KEY", "")
 
 TYPE_ANCHORS = {
     "cognitive":   ["verify-verbal-ability-next-generation", "verify-numerical-ability",
@@ -64,6 +58,26 @@ INJECTION_RULES = [
      "keywords": ["bank","banking","icici","hdfc","sbi"],
      "inject": ["bank-administrative-assistant-short-form","administrative-professional-short-form",
                 "verify-numerical-ability","basic-computer-literacy-windows-10-new"]},
+    {"priority": 1,
+     "keywords": ["product manager","product management","sdlc","jira","confluence"],
+     "inject": ["verify-verbal-ability-next-generation","shl-verify-interactive-inductive-reasoning",
+                "occupational-personality-questionnaire-opq32r","interpersonal-communications",
+                "verify-numerical-ability"]},
+    {"priority": 1,
+     "keywords": ["customer support","customer service","customer success"],
+     "inject": ["english-comprehension-new","interpersonal-communications",
+                "svar-spoken-english-indian-accent-new","verify-verbal-ability-next-generation",
+                "business-communication-adaptive"]},
+    {"priority": 1,
+     "keywords": ["finance","financial analyst","operations analyst"],
+     "inject": ["verify-numerical-ability","microsoft-excel-365-new","microsoft-excel-365-essentials-new",
+                "shl-verify-interactive-numerical-calculation","verify-verbal-ability-next-generation",
+                "shl-verify-interactive-inductive-reasoning"]},
+    {"priority": 1,
+     "keywords": ["presales","pre-sales","rfp","statement of work"],
+     "inject": ["verify-verbal-ability-next-generation","occupational-personality-questionnaire-opq32r",
+                "interpersonal-communications","shl-verify-interactive-inductive-reasoning",
+                "english-comprehension-new","writex-email-writing-sales-new"]},
     {"priority": 2, "keywords": ["java"],
      "inject": ["java-8-new","core-java-entry-level-new","core-java-advanced-level-new",
                 "automata-fix-new","interpersonal-communications"]},
@@ -74,9 +88,16 @@ INJECTION_RULES = [
     {"priority": 2, "keywords": ["consultant","advisory","consulting"],
      "inject": ["verify-verbal-ability-next-generation","occupational-personality-questionnaire-opq32r",
                 "shl-verify-interactive-numerical-calculation"]},
+    {"priority": 2, "keywords": ["analyst","analysis"],
+     "inject": ["verify-numerical-ability","verify-verbal-ability-next-generation",
+                "shl-verify-interactive-inductive-reasoning","microsoft-excel-365-new"]},
     {"priority": 3, "keywords": ["graduate","entry level","entry-level","fresher"],
      "inject": ["verify-verbal-ability-next-generation","verify-numerical-ability",
                 "shl-verify-interactive-inductive-reasoning"]},
+    {"priority": 3, "keywords": ["cognitive","personality test","aptitude"],
+     "inject": ["verify-verbal-ability-next-generation","verify-numerical-ability",
+                "shl-verify-interactive-inductive-reasoning",
+                "occupational-personality-questionnaire-opq32r"]},
 ]
 
 TECH_KEYWORDS = [
@@ -89,44 +110,51 @@ TECH_KEYWORDS = [
 ]
 
 
-def _call_cerebras(prompt: str, max_tokens: int = 800) -> str:
+# ── LLM ───────────────────────────────────────────────────────────────────────
+
+def _call_openrouter(prompt: str, max_tokens: int = 800,
+                     model: str = "meta-llama/llama-3.3-70b-instruct:free") -> str:
     resp = requests.post(
-        "https://api.cerebras.ai/v1/chat/completions",
-        headers={"Authorization": f"Bearer {CEREBRAS_KEY}", "Content-Type": "application/json"},
-        json={"model": "llama-3.3-70b", "messages": [{"role": "user", "content": prompt}],
-              "max_tokens": max_tokens, "temperature": 0.0},
-        timeout=30,
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {OPENROUTER_KEY}",
+            "Content-Type": "application/json",
+        },
+        json={
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": max_tokens,
+            "temperature": 0.0,
+        },
+        timeout=60,
     )
     resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"].strip()
-
-
-def _call_gemini(prompt: str, max_tokens: int = 800) -> str:
-    resp = requests.post(
-        f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_KEY}",
-        headers={"Content-Type": "application/json"},
-        json={"contents": [{"parts": [{"text": prompt}]}],
-              "generationConfig": {"temperature": 0.0, "maxOutputTokens": max_tokens}},
-        timeout=30,
-    )
-    resp.raise_for_status()
-    return resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+    data = resp.json()
+    actual = data.get("model", model)
+    print(f"[LLM] {actual.split('/')[-1][:30]}")
+    return data["choices"][0]["message"]["content"].strip()
 
 
 def llm_call(prompt: str, max_tokens: int = 800) -> str:
-    """Cerebras → Gemini → raise (no 8b fallback — hurts recall)"""
-    if CEREBRAS_KEY:
+    """
+    OpenRouter cascade — all free models, 1M tokens/day
+    Falls through to next model on 429, raises only if all fail
+    """
+    models = [
+        "google/gemma-3-27b-it:free",
+        "qwen/qwen2.5-72b-instruct:free",
+        "openrouter/auto",
+    ]
+    for m in models:
         try:
-            return _call_cerebras(prompt, max_tokens)
+            return _call_openrouter(prompt, max_tokens, model=m)
         except Exception as e:
-            print(f"[LLM] Cerebras failed: {str(e)[:80]}")
-    if GEMINI_KEY:
-        try:
-            return _call_gemini(prompt, max_tokens)
-        except Exception as e:
-            print(f"[LLM] Gemini failed: {str(e)[:80]}")
-    raise RuntimeError("All LLM providers unavailable")
+            print(f"[LLM] {m.split('/')[-1][:20]} failed: {str(e)[:60]}")
+            time.sleep(1)
+    raise RuntimeError("All LLM providers failed")
 
+
+# ── Reranker ──────────────────────────────────────────────────────────────────
 
 class Reranker:
 
@@ -145,10 +173,10 @@ Job: {query[:500]}
 
 {{
   "skills_to_assess": ["skill1","skill2"],
-  "needs_cognitive": true/false,
-  "needs_personality": true/false,
-  "needs_leadership": true/false,
-  "needs_language": true/false,
+  "needs_cognitive": true,
+  "needs_personality": false,
+  "needs_leadership": false,
+  "needs_language": false,
   "seniority": "entry/mid/senior/executive"
 }}""", max_tokens=200)
             raw = re.sub(r"```json|```", "", raw).strip()
@@ -177,7 +205,7 @@ Job: {query[:500]}
         url_map = {a["url"].rstrip("/").split("/")[-1]: a for a in self.assessments}
         result = {}
 
-        # Phase 1
+        # Phase 1 — hardcoded rules
         fired = []
         for rule in sorted(INJECTION_RULES, key=lambda r: r["priority"]):
             if any(kw in q_lower for kw in rule["keywords"]):
@@ -189,7 +217,7 @@ Job: {query[:500]}
         if fired:
             print(f"[Reranker] Rules: {fired} → {len(result)}")
 
-        # Phase 2
+        # Phase 2 — semantic analysis
         analysis = self.analyze_query(query)
 
         if bm25_search_fn:
@@ -233,37 +261,37 @@ Job: {query[:500]}
             if "hour" in m.group(0).lower(): val *= 60
             max_dur = val
 
-        to_rank = candidates[:15]
+        to_rank = candidates[:8]  # 8 instead of 15 — avoids truncated JSON
         lines = []
         for i, item in enumerate(to_rank):
             a = item["assessment"]
             dur = a.get("duration_minutes")
             types = ", ".join(a.get("test_types", [])) or "unknown"
-            lines.append(f"{i+1}. {a['name']} | {types} | {f'{dur}min' if dur else '?'} | {a.get('description','')[:100]}")
+            lines.append(f"{i+1}. {a['name']} | {types} | {f'{dur}min' if dur else '?'} | {a.get('description','')[:80]}")
 
-        prompt = f"""Score each assessment 1-10 for this job. ONLY JSON.
+        prompt = f"""Score each assessment 1-10 for this job. Return ONLY JSON.
 
-JOB: {query[:600]}
-{"DURATION: Prefer tests ≤" + str(max_dur) + "min." if max_dur else ""}
+JOB: {query[:500]}
+{"DURATION: Prefer tests up to " + str(max_dur) + " min." if max_dur else ""}
 
 RULES:
-- Exact tech (Java/SQL/Python/Selenium) → 9-10
+- Exact tech match (Java/SQL/Python/Selenium named) → 9-10
 - C-suite/exec → OPQ/leadership reports → 9-10
 - Sales → sales+English+communication → 7-9
-- Graduate/entry → cognitive (verbal/numerical/inductive) → 7-8
+- Graduate/entry → cognitive tests → 7-8
 - Admin/bank → numerical+admin → 7-9
-- Marketing manager → digital ads+Excel+email writing → 7-9
-- IO Psychology → OPQ+verbal+numerical → 9-10
-- Mixed tech+soft → score BOTH 7+
-- SPREAD scores
+- Mixed tech+soft → score BOTH types 7+
+- SPREAD scores, do not give all same value
 
 {chr(10).join(lines)}
 
-JSON: {{"scores":{{"1":9,"2":3}},"reasoning":"one line"}}"""
+JSON only: {{"scores":{{"1":9,"2":3,"3":7}},"reasoning":"one line"}}"""
 
         try:
-            raw = llm_call(prompt, max_tokens=800)
+            raw = llm_call(prompt, max_tokens=1200)
             raw = re.sub(r"```json|```", "", raw).strip()
+            # Fix truncated JSON
+            raw = re.sub(r',\s*"\d+"\s*:\s*$', '', raw)
             if raw.count("{") > raw.count("}"): raw += "}" * (raw.count("{") - raw.count("}"))
             parsed = json.loads(raw)
             scores = parsed.get("scores", {})
@@ -277,17 +305,21 @@ JSON: {{"scores":{{"1":9,"2":3}},"reasoning":"one line"}}"""
             print(f"[Reranker] min={min(score_vals):.0f} max={max(score_vals):.0f} | {reasoning[:70]}")
 
             if len(set(score_vals)) <= 2:
-                print("[Reranker] Uniform — retrieval order")
+                print("[Reranker] Uniform scores — retrieval order")
                 return candidates[:top_k], reasoning
 
-            ranked = sorted(to_rank, key=lambda x: (x.get("llm_score",5), x.get("embed_score",0)), reverse=True)
+            ranked = sorted(to_rank, key=lambda x: (x.get("llm_score", 5), x.get("embed_score", 0)), reverse=True)
+            ranked_urls = {r["assessment"]["url"] for r in ranked}
+            remaining = [c for c in candidates[8:] if c["assessment"]["url"] not in ranked_urls]
+
             seen, result = set(), []
-            for item in ranked + [c for c in candidates[15:] if c["assessment"]["url"] not in {r["assessment"]["url"] for r in ranked}]:
+            for item in ranked + remaining:
                 url = item["assessment"]["url"]
                 if url not in seen:
                     seen.add(url)
                     result.append(item)
-                if len(result) >= top_k: break
+                if len(result) >= top_k:
+                    break
             return result, reasoning
 
         except Exception as e:
