@@ -1,13 +1,6 @@
 """
 embedder.py — Loads pre-computed matrix from .npy files on Render.
-Falls back to full model if files not found (local dev).
-
-Memory on Render free tier:
-  Before: all-mpnet-base-v2 = ~420MB → OOM
-  After:  .npy matrix load  = ~2.4MB → fits easily in 512MB
-  
-Still needs the model for QUERY encoding (~80MB with MiniLM).
-Assessment vectors are pre-computed — model never runs for those.
+Fixed to avoid meta tensor NotImplementedError on Render.
 """
 
 import numpy as np
@@ -31,15 +24,15 @@ class Embedder:
             print(f"[Embedder] Loaded pre-computed matrix {self._matrix.shape} — skipping model load for assessments")
         else:
             # Fallback: load full model (local dev without .npy files)
-            print(f"[Embedder] No .npy files found — loading full model {model_name}")
-            self._load_model()
+            print(f"[Embedder] No .npy files found — model will be loaded lazily when needed")
 
     def _load_model(self):
         """Lazy model loader — only called when actually needed."""
         if self.model is None:
             from sentence_transformers import SentenceTransformer
-            print(f"[Embedder] Loading {self._model_name}...")
-            self.model = SentenceTransformer(self._model_name)
+            print(f"[Embedder] Loading {self._model_name} on CPU...")
+            # Force CPU to avoid meta tensor issues on Render
+            self.model = SentenceTransformer(self._model_name, device="cpu")
             print("[Embedder] Model ready")
 
     def _text(self, a: dict) -> str:
@@ -83,7 +76,7 @@ class Embedder:
         )[0]
 
         if self._matrix is not None:
-            # Fast path: matrix loaded from .npy — one dot product for all 389
+            # Fast path: matrix loaded from .npy — one dot product for all
             sims    = self._matrix @ q_vec
             url_map = {a["url"]: a for a in assessments}
             results = [
