@@ -2,7 +2,7 @@
 main.py — SHL Assessment Recommendation API v2.1
 
 JSON format matches Appendix 2 of the assignment spec exactly:
-  - GET  /health   → {"status": "healthy"}
+  - GET  /healthy   → {"status": "healthy"}
   - POST /recommend → {"recommended_assessments": [{url, name, adaptive_support,
                         description, duration, remote_support, test_type}, ...]}
 """
@@ -222,7 +222,7 @@ def root():
         "version":     "2.1.0",
         "assessments": len(ASSESSMENTS_FILTERED),
         "endpoints": {
-            "health":    "GET  /health",
+            "healthy":    "GET  /healthy",
             "recommend": "POST /recommend  — body: {\"query\": \"your JD or URL\"}"
         }
     }
