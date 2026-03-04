@@ -284,7 +284,7 @@ def llm_call(prompt: str, max_tokens: int = 800) -> str:
         "meta-llama/llama-3.3-70b-instruct:free",
         "google/gemma-3-27b-it:free",
         "qwen/qwen2.5-72b-instruct:free",
-        "openrouter/auto",
+
     ]:
         try:
             resp = requests.post(
@@ -311,17 +311,25 @@ def llm_call(prompt: str, max_tokens: int = 800) -> str:
             time.sleep(1)
 
     # Tier 2 — Groq
-    try:
-        resp = _groq.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=max_tokens,
-            temperature=0.0,
-        )
-        print("[LLM] Groq llama-3.3-70b-versatile")
-        return resp.choices[0].message.content.strip()
-    except Exception as e:
-        print(f"[LLM] Groq failed: {str(e)[:50]}")
+    for model in [
+        "llama-3.3-70b-versatile", 
+        "llama-3.1-8b-instant",      
+    ]:
+        try:
+            resp = _groq.chat.completions.create(
+                model=model,
+                messages=[{"role": "user", "content": prompt}],
+                max_tokens=max_tokens,
+                temperature=0.0,
+            )
+
+            print(f"[LLM] Groq {model}")
+            return resp.choices[0].message.content.strip()
+
+        except Exception as e:
+            print(f"[LLM] Groq {model[:20]} failed: {str(e)[:60]}")
+            time.sleep(1)
+
 
     raise RuntimeError("All LLM providers failed")
 
