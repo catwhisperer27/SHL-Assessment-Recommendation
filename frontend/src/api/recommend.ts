@@ -1,6 +1,6 @@
 import type { RecommendRequest, RecommendResponse } from "../types"
 
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000"
+const API_BASE = import.meta.env.VITE_API_URL || "https://shl-assessment-recommendation-1-by9w.onrender.com/"
 
 export async function getRecommendations(req: RecommendRequest): Promise<RecommendResponse> {
   const res = await fetch(`${API_BASE}/recommend`, {
