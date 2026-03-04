@@ -169,7 +169,7 @@ export default function App() {
           </div>
 
           {/* Headline */}
-          <h1 style={{ fontSize: 62, fontWeight: 900, lineHeight: 1.04, letterSpacing: "-0.04em", color: "#e8f0ee", marginBottom: 18, animation: "fadeUp 0.5s ease both" }}>
+          <h1 style={{ fontSize: 82, fontWeight: 900, lineHeight: 1.04, letterSpacing: "-0.04em", color: "#e8f0ee", marginBottom: 18, animation: "fadeUp 0.5s ease both" }}>
             The right<br />
             assessment<br />
             for every{" "}
@@ -178,7 +178,7 @@ export default function App() {
             </span>
           </h1>
 
-          <p style={{ fontSize: 14, color: "rgba(180,220,210,0.38)", lineHeight: 1.8, maxWidth: 360, fontWeight: 400, animation: "fadeUp 0.5s ease 0.1s both" }}>
+          <p style={{ fontSize: 18, color: "rgba(180,220,210,0.38)", lineHeight: 1.8, maxWidth: 360, fontWeight: 400, animation: "fadeUp 0.5s ease 0.1s both" }}>
             Paste a job description or URL. The hybrid retrieval pipeline finds the most relevant SHL assessments using semantic search and LLM reranking.
           </p>
         </div>
