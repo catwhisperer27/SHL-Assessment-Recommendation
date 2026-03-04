@@ -86,4 +86,9 @@ export default function App() {
         input { outline: none; }
         input::placeholder { color: rgba(180,220,210,0.18); }
         select { outline: none; }
-        a { tex
+        a { text-decoration: none; }
+        .result-scroll::-webkit-scrollbar { width: 3px; }
+        .result-scroll::-webkit-scrollbar-thumb { background: rgba(0,210,180,0.1); border-radius: 4px; }
+        .pill-btn:hover { background: rgba(0,210,180,0.12) !important; color: #00d2b4 !important; border-color: rgba(0,210,180,0.35) !important; }
+        .run-btn:hover:not(:disabled) { background: #00d2b4 !important; }
+      `}</style>
