@@ -17,7 +17,7 @@ export async function getRecommendations(req: RecommendRequest): Promise<Recomme
 
 export async function healthCheck(): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/health`)
+    const res = await fetch(`${API_BASE}/healthy`)
     return res.ok
   } catch {
     return false
