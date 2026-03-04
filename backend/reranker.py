@@ -388,49 +388,42 @@ Job: {query[:500]}
 
     # ── Add this inside the Reranker class ───────────────────────────────
     def get_injected(self, query: str, bm25_search_fn=None) -> list[dict]:
-        """
-        Return a list of "injected" assessments based on the query using
-        INJECTION_RULES and TYPE_ANCHORS.
-        Each item is {'assessment': {...}, 'embed_score': 1.0}.
-        """
-        if not self.assessments:
-          return []
+    if not self.assessments:
+        return []
 
-        q = query.lower()
-        injected_urls = set()
-        injected = []
+    q = query.lower()
+    injected_urls = set()
+    injected = []
 
     # Priority-based injection
-        for rule in sorted(INJECTION_RULES, key=lambda r: r["priority"]):
-          if any(kw.lower() in q for kw in rule["keywords"]):
-              for slug in rule["inject"]:
-                # Find assessment matching the slug
-                  a = next((x for x in self.assessments if x["url"].endswith(slug)), None)
-                  if a and a["url"] not in injected_urls:
-                      injected.append({"assessment": a, "embed_score": 1.0})
-                      injected_urls.add(a["url"])
+    for rule in sorted(INJECTION_RULES, key=lambda r: r["priority"]):
+        if any(kw.lower() in q for kw in rule["keywords"]):
+            for slug in rule["inject"]:
+                a = next((x for x in self.assessments if x["url"].endswith(slug)), None)
+                if a and a["url"] not in injected_urls:
+                    injected.append({"assessment": a, "embed_score": 1.0})
+                    injected_urls.add(a["url"])
 
-    # Ensure at least one assessment per needed type (e.g., personality, cognitive)
-        semantic = self.analyze_query(query)
-        needs_map = {
-          "cognitive": "needs_cognitive",
-          "personality": "needs_personality",
-          "leadership": "needs_leadership",
-          "language": "needs_language",
-      }
+    # Semantic analysis for type anchors
+    semantic = self.analyze_query(query)
+    needs_map = {
+        "cognitive":   "needs_cognitive",
+        "personality": "needs_personality",
+        "leadership":  "needs_leadership",
+        "language":    "needs_language",
+    }
 
-        for typ, flag in needs_map.items():
-          if semantic.get(flag, False):
-              # Find first type anchor not already injected
-              for slug in TYPE_ANCHORS.get(typ, []):
-                  a = next((x for x in self.assessments if x["url"].endswith(slug)), None)
-                  if a and a["url"] not in injected_urls:
-                      injected.append({"assessment": a, "embed_score": 0.9})
-                      injected_urls.add(a["url"])
-                      break  # inject only one per type
+    for typ, flag in needs_map.items():
+        if semantic.get(flag, False):
+            for slug in TYPE_ANCHORS.get(typ, []):
+                a = next((x for x in self.assessments if x["url"].endswith(slug)), None)
+                if a and a["url"] not in injected_urls:
+                    injected.append({"assessment": a, "embed_score": 0.9})
+                    injected_urls.add(a["url"])
+                    break
 
-        return injected
-
+    return injected
+  
     def rerank(self, query: str, candidates: list[dict], top_k: int = 10) -> tuple[list[dict], str]:
         """Scores candidates with LLM, fallback to retrieval order if LLM fails"""
         if not candidates:
