@@ -6,7 +6,7 @@ export async function getRecommendations(req: RecommendRequest): Promise<Recomme
   const res = await fetch(`${API_BASE}/recommend`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
+    body: JSON.stringify({ query: req.query }),  // only send query
   })
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: "Unknown error" }))
@@ -17,7 +17,12 @@ export async function getRecommendations(req: RecommendRequest): Promise<Recomme
 
 export async function healthCheck(): Promise<boolean> {
   try {
-    const res = await fetch(`${API_BASE}/healthy`)
+    const controller = new AbortController()
+    const timeout = setTimeout(() => controller.abort(), 30000)
+    const res = await fetch(`${API_BASE}/healthy`, {
+      signal: controller.signal
+    })
+    clearTimeout(timeout)
     return res.ok
   } catch {
     return false
