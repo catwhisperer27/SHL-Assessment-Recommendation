@@ -272,19 +272,18 @@ TECH_KEYWORDS = [
 
 # ── LLM ───────────────────────────────────────────────────────────────────────
 
+# ── LLM ───────────────────────────────────────────────────────────────────────
+
 def llm_call(prompt: str, max_tokens: int = 800) -> str:
     """
     Three-tier LLM cascade — never crashes, always returns or raises cleanly.
-      Tier 1: OpenRouter free models (1M tokens/day, 30 RPM)
-      Tier 2: Groq llama-3.3-70b (100k tokens/day, kicks in on OpenRouter 402)
-      Tier 3: raises RuntimeError → caller falls back to retrieval order
+    Returns a string result or raises RuntimeError if all providers fail.
     """
     # Tier 1 — OpenRouter
     for model in [
         "meta-llama/llama-3.3-70b-instruct:free",
         "google/gemma-3-27b-it:free",
         "qwen/qwen2.5-72b-instruct:free",
-
     ]:
         try:
             resp = requests.post(
@@ -298,7 +297,7 @@ def llm_call(prompt: str, max_tokens: int = 800) -> str:
                 timeout=60,
             )
             resp.raise_for_status()
-            data   = resp.json()
+            data = resp.json()
             actual = data.get("model", model).split("/")[-1][:30]
             print(f"[LLM] {actual}")
             return data["choices"][0]["message"]["content"].strip()
@@ -308,13 +307,12 @@ def llm_call(prompt: str, max_tokens: int = 800) -> str:
             if "402" in err:
                 print("[LLM] OpenRouter daily limit — switching to Groq")
                 break
+            if "429" in err:
+                print("[LLM] Rate limited — retry later")
             time.sleep(1)
 
     # Tier 2 — Groq
-    for model in [
-        "llama-3.3-70b-versatile", 
-        "llama-3.1-8b-instant",      
-    ]:
+    for model in ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]:
         try:
             resp = _groq.chat.completions.create(
                 model=model,
@@ -322,15 +320,13 @@ def llm_call(prompt: str, max_tokens: int = 800) -> str:
                 max_tokens=max_tokens,
                 temperature=0.0,
             )
-
             print(f"[LLM] Groq {model}")
             return resp.choices[0].message.content.strip()
-
         except Exception as e:
             print(f"[LLM] Groq {model[:20]} failed: {str(e)[:60]}")
             time.sleep(1)
 
-
+    # Final fallback — raise so caller can handle gracefully
     raise RuntimeError("All LLM providers failed")
 
 
@@ -345,11 +341,7 @@ class Reranker:
         self.assessments = assessments
 
     def analyze_query(self, query: str) -> dict:
-        """
-        LLM semantic analysis — extracts skills and assessment type needs.
-        Handles unseen role phrasings that hardcoded rules don't cover.
-        Falls back to keyword heuristics if LLM is unavailable.
-        """
+        """LLM semantic analysis — fallback to heuristics if LLM unavailable"""
         try:
             raw = llm_call(
                 f"""Analyze this job for psychometric assessment needs. Return ONLY JSON.
@@ -362,7 +354,7 @@ Job: {query[:500]}
                 max_tokens=200,
             )
             result = json.loads(re.sub(r"```json|```", "", raw).strip())
-            needs  = [k[6:] for k, v in result.items() if k.startswith("needs_") and v]
+            needs = [k[6:] for k, v in result.items() if k.startswith("needs_") and v]
             print(f"[Reranker] Semantic: {result.get('seniority','?')} | "
                   f"skills={result.get('skills_to_assess',[])} | needs={needs}")
             return result
@@ -382,61 +374,6 @@ Job: {query[:500]}
                 ),
             }
 
-    def get_injected(self, query: str, bm25_search_fn=None) -> list[dict]:
-        """
-        Builds the priority candidate pool before retrieval.
-
-        Phase 1 — Hardcoded rules (zero LLM tokens)
-          Maps role/domain keywords to known-relevant assessment slugs.
-          Solves the semantic gap: 'Verify Verbal Ability' has no domain
-          keywords so embeddings alone never retrieve it for 'radio manager'.
-
-        Phase 2 — LLM semantic analysis (~150 tokens)
-          Extracts skills → BM25 queries for unseen phrasings.
-          Maps needs_* flags to type anchors.
-          Senior/executive roles always get personality + leadership injected.
-        """
-        q_lower = query.lower()
-        url_map = {a["url"].rstrip("/").split("/")[-1]: a for a in self.assessments}
-        pool    = {}
-
-        # Phase 1: hardcoded rules
-        fired = []
-        for rule in sorted(INJECTION_RULES, key=lambda r: r["priority"]):
-            if any(kw in q_lower for kw in rule["keywords"]):
-                fired.append([k for k in rule["keywords"] if k in q_lower])
-                score = 1.0 - rule["priority"] * 0.1
-                for slug in rule["inject"]:
-                    a = url_map.get(slug)
-                    if a and a["url"] not in pool:
-                        pool[a["url"]] = {"assessment": a, "embed_score": score}
-        if fired:
-            print(f"[Reranker] Rules: {fired} → {len(pool)}")
-
-        # Phase 2: semantic analysis
-        analysis = self.analyze_query(query)
-
-        if bm25_search_fn:
-            for skill in analysis.get("skills_to_assess", [])[:4]:
-                for item in bm25_search_fn(skill, top_k=5)[:3]:
-                    a = item["assessment"]
-                    if a["url"] not in pool:
-                        pool[a["url"]] = {"assessment": a, "embed_score": 0.80}
-
-        if analysis.get("seniority") in ["senior", "executive"]:
-            analysis["needs_personality"] = True
-            analysis["needs_leadership"]  = True
-
-        for flag, cat in [("needs_cognitive", "cognitive"), ("needs_personality", "personality"),
-                          ("needs_leadership", "leadership"), ("needs_language", "language")]:
-            if analysis.get(flag):
-                for slug in TYPE_ANCHORS.get(cat, []):
-                    a = url_map.get(slug)
-                    if a and a["url"] not in pool:
-                        pool[a["url"]] = {"assessment": a, "embed_score": 0.75}
-
-        return list(pool.values())
-
     def expand_query(self, jd: str) -> str:
         """Appends extracted skill keywords to improve BM25/vector retrieval."""
         try:
@@ -445,21 +382,16 @@ Job: {query[:500]}
                 max_tokens=150,
             )
             return f"{jd}\n\nRequired: {skills}"
-        except Exception:
-            return jd
+        except Exception as e:
+            print(f"[Reranker] expand_query fallback ({e})")
+            return jd  # fallback to job description only
 
     def rerank(self, query: str, candidates: list[dict], top_k: int = 10) -> tuple[list[dict], str]:
-        """
-        Scores top-8 candidates with LLM and reorders them.
-        Falls back to retrieval order if LLM fails or gives uniform scores.
-
-        top-8 not top-15: avoids truncated JSON from smaller free models.
-        Retrieval fallback not 8b: 8b gives uniform scores, scrambling correct order.
-        """
+        """Scores candidates with LLM, fallback to retrieval order if LLM fails"""
         if not candidates:
             return [], ""
 
-        # Extract duration constraint if mentioned (e.g. "40 minutes", "1 hour")
+        # Prepare prompt
         max_dur = None
         m = re.search(r"\b(\d+)\s*(?:minutes?|mins?|hours?|hrs?)\b", query, re.I)
         if m:
@@ -469,29 +401,18 @@ Job: {query[:500]}
             max_dur = val
 
         to_rank = candidates[:8]
-        lines   = []
+        lines = []
         for i, item in enumerate(to_rank):
-            a     = item["assessment"]
-            dur   = a.get("duration_minutes")
+            a = item["assessment"]
+            dur = a.get("duration_minutes")
             types = ", ".join(a.get("test_types", [])) or "unknown"
-            lines.append(
-                f"{i+1}. {a['name']} | {types} | "
-                f"{f'{dur}min' if dur else '?'} | {a.get('description', '')[:80]}"
-            )
+            lines.append(f"{i+1}. {a['name']} | {types} | "
+                         f"{f'{dur}min' if dur else '?'} | {a.get('description', '')[:80]}")
 
         prompt = f"""Score each assessment 1-10 for this job. Return ONLY JSON.
 
 JOB: {query[:500]}
-{f"DURATION: Prefer tests up to {max_dur} min." if max_dur else ""}
-
-SCORING GUIDE:
-- Exact tech match (Java/SQL/Python/Selenium) → 9-10
-- C-suite/exec role → OPQ/leadership reports → 9-10
-- Sales role → sales + English + communication → 7-9
-- Graduate/entry → cognitive tests → 7-8
-- Admin/bank → numerical + admin tests → 7-9
-- Mixed tech + soft skills → score BOTH types 7+
-- SPREAD scores (do not give all the same value)
+{f'DURATION: Prefer tests up to {max_dur} min.' if max_dur else ''}
 
 {chr(10).join(lines)}
 
@@ -501,13 +422,13 @@ JSON only: {{"scores":{{"1":9,"2":3,"3":7}},"reasoning":"one line"}}"""
             raw = llm_call(prompt, max_tokens=1200)
             raw = re.sub(r"```json|```", "", raw).strip()
 
-            # Repair truncated JSON (happens with smaller free models)
+            # Repair truncated JSON
             raw = re.sub(r',\s*"\d+"\s*:\s*$', "", raw)
             if raw.count("{") > raw.count("}"):
                 raw += "}" * (raw.count("{") - raw.count("}"))
 
-            parsed    = json.loads(raw)
-            scores    = parsed.get("scores", {})
+            parsed = json.loads(raw)
+            scores = parsed.get("scores", {})
             reasoning = parsed.get("reasoning", "")
 
             for i, item in enumerate(to_rank):
@@ -517,16 +438,13 @@ JSON only: {{"scores":{{"1":9,"2":3,"3":7}},"reasoning":"one line"}}"""
             score_vals = [item["llm_score"] for item in to_rank]
             print(f"[Reranker] min={min(score_vals):.0f} max={max(score_vals):.0f} | {reasoning[:70]}")
 
-            # Uniform scores = LLM wasn't useful → retrieval order is better
             if len(set(score_vals)) <= 2:
-                print("[Reranker] Uniform scores — retrieval order")
+                print("[Reranker] Uniform scores — retrieval order fallback")
                 return candidates[:top_k], reasoning
 
-            ranked      = sorted(to_rank,
-                                 key=lambda x: (x.get("llm_score", 5), x.get("embed_score", 0)),
-                                 reverse=True)
+            ranked = sorted(to_rank, key=lambda x: (x.get("llm_score", 5), x.get("embed_score", 0)), reverse=True)
             ranked_urls = {r["assessment"]["url"] for r in ranked}
-            remaining   = [c for c in candidates[8:] if c["assessment"]["url"] not in ranked_urls]
+            remaining = [c for c in candidates[8:] if c["assessment"]["url"] not in ranked_urls]
 
             seen, result = set(), []
             for item in ranked + remaining:
@@ -540,5 +458,8 @@ JSON only: {{"scores":{{"1":9,"2":3,"3":7}},"reasoning":"one line"}}"""
             return result, reasoning
 
         except Exception as e:
-            print(f"[Reranker] failed: {e} — retrieval order")
-            return candidates[:top_k], ""
+            print(f"[Reranker] rerank fallback ({e}) — retrieval order")
+            # fallback: just return top candidates by retrieval order
+            for item in candidates:
+                item["llm_score"] = 0
+            return candidates[:top_k], "LLM unavailable — retrieval order"
