@@ -177,7 +177,6 @@ def _fmt(item: dict) -> AssessmentOut:
 
 # ── Endpoints ─────────────────────────────────────────────────────────────────
 @app.get("/health")
-@app.get("/healthy")
 def healthy():
     """Healthy check — returns {"status": "healthy"} as per PDF spec."""
     return {"status": "healthy"}
