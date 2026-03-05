@@ -34,6 +34,7 @@ export default function App() {
   const rightPanelRef = useRef<HTMLDivElement>(null)
 
   const isRunning = phase === "expanding" || phase === "embedding" || phase === "reranking"
+  const showNote = !response
 
   const run = async () => {
     if (!jd.trim() || isRunning) return
@@ -68,8 +69,11 @@ export default function App() {
     "::-webkit-scrollbar-track { background: transparent; }",
     "::-webkit-scrollbar-thumb { background: rgba(0,210,180,0.12); border-radius: 4px; }",
     "@keyframes fadeUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }",
+    "@keyframes fadeOut { from { opacity:1; transform:translateY(0); } to { opacity:0; transform:translateY(-6px); } }",
     "@keyframes spin { to { transform: rotate(360deg); } }",
     "@keyframes pulse { 0%,100% { opacity:0.5; } 50% { opacity:1; } }",
+    "@keyframes geminiSwirl { 0%{filter:hue-rotate(0deg) brightness(1.1);opacity:0.9} 25%{filter:hue-rotate(90deg) brightness(1.3);opacity:1} 50%{filter:hue-rotate(200deg) brightness(1.2);opacity:0.85} 75%{filter:hue-rotate(290deg) brightness(1.4);opacity:1} 100%{filter:hue-rotate(360deg) brightness(1.1);opacity:0.9} }",
+    "@keyframes geminiBorderSwirl { 0%{filter:hue-rotate(0deg) brightness(1.2);opacity:1} 100%{filter:hue-rotate(360deg) brightness(1.2);opacity:1} }",
     "textarea { outline: none; resize: none; }",
     "textarea::placeholder { color: rgba(180,220,210,0.18); }",
     "input { outline: none; }",
@@ -80,6 +84,23 @@ export default function App() {
     ".result-scroll::-webkit-scrollbar-thumb { background: rgba(0,210,180,0.1); border-radius: 4px; }",
     ".pill-btn:hover { background: rgba(0,210,180,0.12) !important; color: #00d2b4 !important; border-color: rgba(0,210,180,0.35) !important; }",
     ".run-btn:hover:not(:disabled) { background: #00d2b4 !important; }",
+    ".note-corner { position: absolute; width: 10px; height: 10px; }",
+    ".note-corner::before, .note-corner::after { content: ''; position: absolute; background: linear-gradient(135deg, #4285F4, #EA4335, #FBBC05, #34A853); border-radius: 1px; }",
+    ".note-corner--tl { top: -1px; left: -1px; }",
+    ".note-corner--tl::before { width: 2px; height: 10px; top: 0; left: 0; }",
+    ".note-corner--tl::after  { width: 10px; height: 2px; top: 0; left: 0; }",
+    ".note-corner--tr { top: -1px; right: -1px; }",
+    ".note-corner--tr::before { width: 2px; height: 10px; top: 0; right: 0; }",
+    ".note-corner--tr::after  { width: 10px; height: 2px; top: 0; right: 0; }",
+    ".note-corner--bl { bottom: -1px; left: -1px; }",
+    ".note-corner--bl::before { width: 2px; height: 10px; bottom: 0; left: 0; }",
+    ".note-corner--bl::after  { width: 10px; height: 2px; bottom: 0; left: 0; }",
+    ".note-corner--br { bottom: -1px; right: -1px; }",
+    ".note-corner--br::before { width: 2px; height: 10px; bottom: 0; right: 0; }",
+    ".note-corner--br::after  { width: 10px; height: 2px; bottom: 0; right: 0; }",
+    isRunning
+      ? ".note-corner { animation: geminiSwirl 2s ease-in-out infinite; } .note-corner--tr { animation-delay: 0.5s; } .note-corner--bl { animation-delay: 1s; } .note-corner--br { animation-delay: 1.5s; }"
+      : ".note-corner { animation: none; opacity: 0.3; filter: saturate(0.4); }",
   ].join("\n")
 
   return (
@@ -204,7 +225,7 @@ export default function App() {
               value={jd}
               onChange={e => setJd(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter" && e.metaKey) run() }}
-              placeholder="Paste a job description, role title, or URL...The backend is hosted on Render. For the first visit after some time, the service may take up to 1 minute to start. Please be patient while it boots."
+              placeholder="Paste a job description, role title, or URL..."
               style={{
                 width: "100%", background: "transparent", border: "none",
                 color: "#e8f0ee", fontSize: 13, padding: "18px 20px",
@@ -252,6 +273,41 @@ export default function App() {
               </button>
             </div>
           </div>
+
+          {/* Render cold-start note — hidden once results load */}
+          {showNote && (
+            <div style={{
+              position: "relative",
+              padding: "10px 16px",
+              background: isRunning ? "rgba(66,133,244,0.04)" : "rgba(255,255,255,0.03)",
+              border: "1px solid transparent",
+              backgroundClip: "padding-box",
+              borderRadius: 10,
+              boxShadow: isRunning
+                ? "0 0 0 1px rgba(66,133,244,0.3), 0 0 14px rgba(251,188,5,0.08), 0 0 14px rgba(52,168,83,0.08)"
+                : "0 0 0 1px rgba(255,255,255,0.07)",
+              transition: "box-shadow 0.6s ease, background 0.6s ease",
+              animation: "fadeUp 0.4s ease both",
+            }}>
+              {/* Blinking corner brackets */}
+              <span className="note-corner note-corner--tl" />
+              <span className="note-corner note-corner--tr" />
+              <span className="note-corner note-corner--bl" />
+              <span className="note-corner note-corner--br" />
+
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                <span style={{ fontSize: 13, lineHeight: 1, marginTop: 1 }}>⚡</span>
+                <div>
+                  <p style={{ fontSize: 11, color: "rgba(0,210,180,0.75)", lineHeight: 1.6, fontWeight: 500 }}>
+                    The backend is hosted on Render. For the first visit after some time, the service may take up to <span style={{ color: "#00d2b4", fontWeight: 700 }}>1 minute</span> to start. Please be patient while it boots.
+                  </p>
+                  <p style={{ fontSize: 10, color: "rgba(180,220,210,0.3)", marginTop: 4, lineHeight: 1.5 }}>
+                    If it takes more than 1 min with no response, reload the page and try again.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {error && (
             <div style={{ fontSize: 11, color: "#f87171", background: "rgba(248,113,113,0.07)", border: "1px solid rgba(248,113,113,0.15)", padding: "8px 14px", borderRadius: 8, animation: "fadeUp 0.3s ease both" }}>
