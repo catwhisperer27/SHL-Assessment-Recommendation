@@ -204,7 +204,7 @@ export default function App() {
               value={jd}
               onChange={e => setJd(e.target.value)}
               onKeyDown={e => { if (e.key === "Enter" && e.metaKey) run() }}
-              placeholder="Paste a job description, role title, or URL..."
+              placeholder="Paste a job description, role title, or URL...The backend is hosted on Render. For the first visit after some time, the service may take up to 1 minute to start. Please be patient while it boots."
               style={{
                 width: "100%", background: "transparent", border: "none",
                 color: "#e8f0ee", fontSize: 13, padding: "18px 20px",
