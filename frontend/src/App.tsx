@@ -73,7 +73,13 @@ export default function App() {
     "@keyframes spin { to { transform: rotate(360deg); } }",
     "@keyframes pulse { 0%,100% { opacity:0.5; } 50% { opacity:1; } }",
     "@keyframes geminiSwirl { 0%{filter:hue-rotate(0deg) brightness(1.1);opacity:0.9} 25%{filter:hue-rotate(90deg) brightness(1.3);opacity:1} 50%{filter:hue-rotate(200deg) brightness(1.2);opacity:0.85} 75%{filter:hue-rotate(290deg) brightness(1.4);opacity:1} 100%{filter:hue-rotate(360deg) brightness(1.1);opacity:0.9} }",
-    "@keyframes geminiBorderSwirl { 0%{filter:hue-rotate(0deg) brightness(1.2);opacity:1} 100%{filter:hue-rotate(360deg) brightness(1.2);opacity:1} }",
+    "@keyframes geminiBorder { 0%{background-position:0% 50%} 50%{background-position:100% 50%} 100%{background-position:0% 50%} }",
+    ".note-border-wrap { position:relative; border-radius:11px; padding:1.5px; }",
+    ".note-border-wrap::before { content:''; position:absolute; inset:0; border-radius:11px; background: linear-gradient(135deg, #4285F4, #EA4335, #FBBC05, #34A853, #4285F4, #EA4335); background-size:300% 300%; z-index:0; }",
+    isRunning
+      ? ".note-border-wrap::before { animation: geminiBorder 2.5s ease infinite; opacity:1; }"
+      : ".note-border-wrap::before { animation: none; opacity:0.25; filter: saturate(0.5); }",
+    ".note-inner { position:relative; z-index:1; border-radius:10px; background:#0c0f0e; }",
     "textarea { outline: none; resize: none; }",
     "textarea::placeholder { color: rgba(180,220,210,0.18); }",
     "input { outline: none; }",
@@ -276,34 +282,18 @@ export default function App() {
 
           {/* Render cold-start note — hidden once results load */}
           {showNote && (
-            <div style={{
-              position: "relative",
-              padding: "10px 16px",
-              background: isRunning ? "rgba(66,133,244,0.04)" : "rgba(255,255,255,0.03)",
-              border: "1px solid transparent",
-              backgroundClip: "padding-box",
-              borderRadius: 10,
-              boxShadow: isRunning
-                ? "0 0 0 1px rgba(66,133,244,0.3), 0 0 14px rgba(251,188,5,0.08), 0 0 14px rgba(52,168,83,0.08)"
-                : "0 0 0 1px rgba(255,255,255,0.07)",
-              transition: "box-shadow 0.6s ease, background 0.6s ease",
-              animation: "fadeUp 0.4s ease both",
-            }}>
-              {/* Blinking corner brackets */}
-              <span className="note-corner note-corner--tl" />
-              <span className="note-corner note-corner--tr" />
-              <span className="note-corner note-corner--bl" />
-              <span className="note-corner note-corner--br" />
-
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-                <span style={{ fontSize: 13, lineHeight: 1, marginTop: 1 }}>⚡</span>
-                <div>
-                  <p style={{ fontSize: 11, color: "rgba(0,210,180,0.75)", lineHeight: 1.6, fontWeight: 500 }}>
-                    The backend is hosted on Render. For the first visit after some time, the service may take up to <span style={{ color: "#00d2b4", fontWeight: 700 }}>1 minute</span> to start. Please be patient while it boots.
-                  </p>
-                  <p style={{ fontSize: 10, color: "rgba(180,220,210,0.3)", marginTop: 4, lineHeight: 1.5 }}>
-                    If it takes more than 1 min with no response, reload the page and try again.
-                  </p>
+            <div className="note-border-wrap" style={{ animation: "fadeUp 0.4s ease both" }}>
+              <div className="note-inner" style={{ padding: "10px 16px" }}>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+                  <span style={{ fontSize: 13, lineHeight: 1, marginTop: 1 }}>⚡</span>
+                  <div>
+                    <p style={{ fontSize: 11, color: "rgba(200,220,215,0.8)", lineHeight: 1.6, fontWeight: 500 }}>
+                      The backend is hosted on Render. For the first visit after some time, the service may take up to <span style={{ color: "#fff", fontWeight: 700 }}>1 minute</span> to start. Please be patient while it boots.
+                    </p>
+                    <p style={{ fontSize: 10, color: "rgba(180,220,210,0.3)", marginTop: 4, lineHeight: 1.5 }}>
+                      If it takes more than 1 min with no response, reload the page and try again.
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
